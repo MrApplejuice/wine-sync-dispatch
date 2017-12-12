@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+#include <vector>
 #include <string>
 #include <iostream>
 #include <functional>
@@ -37,7 +38,7 @@ private:
 	sockaddr_in targetAddress;
 public:
 	SocketClient(const char* ip_address, int port) : 
-			_socket(INVALID_SOCKET) {
+				_socket(INVALID_SOCKET) {
 		unsigned long ip_addr = inet_addr(ip_address);
 		if (ip_addr == INADDR_NONE) {
 			throw SocketException("invalid ip address specified");
@@ -103,6 +104,8 @@ class CommunicationProtocol {
 private:
 	bool stop;
 public:
+	typedef std::vector<std::string> StartParametersList;
+
 	ComSocket* comSocket;
 	std::thread writeThread;
 	
@@ -118,7 +121,6 @@ public:
 				if (readLength <= 0) {
 					std::this_thread::sleep_for(std::chrono::milliseconds(100));
 				} else {
-					std::cout << "Read " << readLength << std::endl;
 					comSocket->send(
 						"s" + 
 						std::string(reinterpret_cast<const char*>(&readLength), 4) +
@@ -140,7 +142,6 @@ public:
 					throw ProtocolException("missing exitcode");
 				}
 				const char exitCodeChar = exitCodeByte[0];
-				std::cout << "attempting to exit program: " << (int) exitCodeChar << std::endl;
 				return exitCodeChar;
 			} else {
 				throw ProtocolException("invalid message type");
@@ -148,15 +149,40 @@ public:
 		}
 	}
 	
-	CommunicationProtocol(ComSocket* socket) : 
-			stop(false),
-			comSocket(socket),
-			writeThread(std::bind(&CommunicationProtocol::writeLoop, this)) {
+	void serializeStartParameters(
+			const StartParametersList& startParameterList) {
+		std::string buffer;
+		
+		int32_t count = startParameterList.size();
+		buffer += std::string(
+			reinterpret_cast<const char*>(&count),
+			sizeof(count));
+		
+		for (const std::string& p : startParameterList) {
+			int32_t str_size = p.size();
+			buffer += std::string(
+				reinterpret_cast<const char*>(&str_size),
+				sizeof(str_size));
+			buffer += p;
+		}
+		
+		comSocket->send(buffer);
+	}
+	
+	CommunicationProtocol(
+			ComSocket* socket,
+			const StartParametersList& startParameterList) : 
+				stop(false),
+				comSocket(socket) {
+		serializeStartParameters(startParameterList);
+		writeThread = std::thread(std::bind(&CommunicationProtocol::writeLoop, this));
 	}
 	
 	virtual ~CommunicationProtocol() {
 		stop = true;
-		writeThread.join();
+		if (writeThread.joinable()) {
+			writeThread.join();
+		}
 	}
 };
 
@@ -186,8 +212,10 @@ int main(int argc, const char** argv) {
 	try {
 		WSAInitializer wsaInit;
 		
-		SocketClient socket("127.0.0.1", 8888);
-		resultCode = CommunicationProtocol(&socket).readLoop();
+		SocketClient socket("127.0.0.1", 8889);
+		resultCode = CommunicationProtocol(
+			&socket,
+			{"echo", "Hello World!"}).readLoop();
 	}
 	catch (const ProtocolException& se) {
 		std::cerr << "wine-pack protocol error: " << se.error << std::endl;
