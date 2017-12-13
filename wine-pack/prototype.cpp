@@ -4,6 +4,7 @@
 #include <string>
 #include <iostream>
 #include <functional>
+#include <fstream>
 
 #include <winsock2.h>
 
@@ -187,6 +188,70 @@ public:
 };
 
 
+class ConfigFileException : public std::exception {
+public:
+	const std::string error;
+
+	ConfigFileException(const std::string& error) : error(error) {
+	}
+};
+
+static std::string strip_str(std::string str) {
+	const std::string whitespace(" \t\n\r");
+	int start = 0;
+	while (start < str.size() && whitespace.find(str[start]) != std::string::npos) {
+		start++;
+	}
+	
+	int end = str.size() - 1;
+	while (end > 0 && whitespace.find(str[end]) != std::string::npos) {
+		end--;
+	}
+	if (end < start) {
+		end = start;
+	}
+	
+	return str.substr(start, end - start + 1);
+}
+
+class ConfigFile {
+public:
+	std::string ipAddress;
+	int port;
+	CommunicationProtocol::StartParametersList args;
+
+	ConfigFile(const std::string& confFilePath) {
+		ipAddress ="";
+		port = -1;
+		
+		std::fstream openFile(confFilePath, std::ios_base::in);
+		if (!openFile.is_open()) {
+			throw ConfigFileException("missing config file: " + confFilePath);
+		}
+		for (std::string line; std::getline(openFile, line); ) {
+			line = strip_str(line);
+			if (line.size() == 0 || line.find("#") == 0) {
+			} else if (line.find("IP=") == 0) {
+				ipAddress = line.substr(3);
+			} else if (line.find("PORT=") == 0) {
+				port = atoi(line.substr(5).c_str());
+			} else if (line.find("ARG=") == 0) {
+				args.push_back(line.substr(4));
+			} else {
+				throw ConfigFileException("invalid argument: " + line);
+			}
+		}
+		
+		if (ipAddress == "") {
+			throw ConfigFileException("no ip address defined");
+		}
+		if (!(port > 0 && port < 65536)) {
+			throw ConfigFileException("no valid port");
+		}
+	}
+};
+
+
 class WSAInitializer {
 public:
 	bool initialized;
@@ -210,12 +275,25 @@ public:
 int main(int argc, const char** argv) {
 	int resultCode = 0;
 	try {
+		ConfigFile configFile(std::string(argv[0]) + ".conf");
+		
 		WSAInitializer wsaInit;
 		
-		SocketClient socket("127.0.0.1", 8889);
+		SocketClient socket(configFile.ipAddress.c_str(), configFile.port);
+		
+		CommunicationProtocol::StartParametersList paramList =
+			configFile.args;
+		for (int i = 1; i < argc; i++) {
+			paramList.push_back(argv[i]);
+		}
+		
 		resultCode = CommunicationProtocol(
 			&socket,
-			{"echo", "Hello World!"}).readLoop();
+			paramList).readLoop();
+	}
+	catch (const ConfigFileException& se) {
+		std::cerr << "wine-pack config error: " << se.error << std::endl;
+		return PROGRAM_ERROR_CODE;
 	}
 	catch (const ProtocolException& se) {
 		std::cerr << "wine-pack protocol error: " << se.error << std::endl;

@@ -19,12 +19,10 @@ class ExecutionHandler(socketserver.BaseRequestHandler):
     def handle(self):
         arguments = list(self.read_string() for _ in range(self.read_int()))
         
-        for arg in arguments:
-            print("ARG", arg)
+        print("CMD", *arguments)
         print("---------")
         
         process = subprocess.run(arguments,
-            shell=True,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE)
