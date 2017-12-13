@@ -1,5 +1,7 @@
 #!/usr/bin/python3.6
 
+import os
+
 import sys
 import struct
 
@@ -18,20 +20,22 @@ class ExecutionHandler(socketserver.BaseRequestHandler):
 
     def handle(self):
         arguments = list(self.read_string() for _ in range(self.read_int()))
-        
+
         print("CMD", *arguments)
         print("---------")
-        
+
         process = subprocess.run(arguments,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE)
-        
+
         self.request.sendall(b"e" + struct.pack("B", process.returncode))
         self.request.close()
-        
+
 if __name__ == "__main__":
-    HOST, PORT = "127.0.0.1", 8889
+    HOST = os.environ.get("HOST", "127.0.0.1")
+    PORT = int(os.environ.get("PORT", "8888"))
+    print(f"Starting server on {HOST}:{PORT}")
 
     # Create the server, binding to localhost on port 9999
     with socketserver.ThreadingTCPServer((HOST, PORT), ExecutionHandler) as server:
